@@ -76,7 +76,7 @@ def analysis():
     cs = search_space_3.get_configuration_space()
 
     # Load NASBench
-    nasbench = NasbenchWrapper('../nasbench_data/108_e/nasbench_full.tfrecord')
+    nasbench = NasbenchWrapper('/Users/liqi17thu/Documents/GitHub/nasbench/nasbench_full.tfrecord')
     search_space_3.objective_function(nasbench, cs.sample_configuration())
 
     test_error = []

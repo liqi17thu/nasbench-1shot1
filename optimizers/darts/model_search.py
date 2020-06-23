@@ -1,6 +1,9 @@
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+import copy
+import numpy as np
+
 from nasbench_analysis.search_spaces.search_space_1 import SearchSpace1
 from optimizers.darts.genotypes import PRIMITIVES
 from optimizers.darts.operations import *
@@ -22,6 +25,15 @@ class MixedOp(nn.Module):
 
     def forward(self, x, weights):
         return sum(w * op(x) for w, op in zip(weights, self._ops))
+
+    def extract_sub(self, weights):
+        op = copy.deepcopy(self._ops[np.argmax(weights)])
+        return Op(op)
+
+class Op(nn.Module):
+    def __init__(self, op):
+        super(Op, self).__init__()
+        self.op = op
 
 
 class ChoiceBlock(nn.Module):
@@ -48,6 +60,15 @@ class ChoiceBlock(nn.Module):
         # Apply Mixed Op
         output = self.mixed_op(input_to_mixed_op, weights=weights)
         return output
+
+    def extract_sub(self, weights):
+        return Block(self.mixed_op.extract_sub(weights))
+
+
+class Block(nn.Module):
+    def __init__(self, op):
+        super(Block, self).__init__()
+        self.op = op
 
 
 class Cell(nn.Module):
@@ -113,6 +134,19 @@ class Cell(nn.Module):
         # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L325
         return output_weights[0][0] * input_to_output_edge + torch.cat(tensor_list, dim=1)
 
+    def extract_sub(self, weights):
+        blocks = nn.ModuleList()
+        for i in range(len(self._choice_blocks)):
+            blocks.append(self._choice_blocks[i].extract_sub(weights[i,:]))
+
+        return ReducedCell(blocks, copy.deepcopy(self._bns), copy.deepcopy(self._input_projections))
+
+class ReducedCell(nn.Module):
+    def __init__(self, blocks, bns, input_projections):
+        super(ReducedCell, self).__init__()
+        self.blocks = blocks
+        self.bns = bns
+        self.input_projections = input_projections
 
 class Network(nn.Module):
 
@@ -228,3 +262,17 @@ class Network(nn.Module):
 
     def arch_parameters(self):
         return self._arch_parameters
+
+    def extract_sub(self, weights):
+        subcells = nn.ModuleList()
+        for cell in self.cells:
+            subcells.append(cell.extract_sub(weights))
+
+        return SubNetwork(copy.deepcopy(self.stem), subcells, copy.deepcopy(self.classifier))
+
+class SubNetwork(nn.Module):
+    def __init__(self, stem, subcells, classifier):
+        super(SubNetwork, self).__init__()
+        self.stem = stem
+        self.subcells = subcells
+        self.classifier = classifier
